@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Boxes, ChartNoAxesCombined,
   Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Coins, House,
@@ -9,6 +9,23 @@ import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis,
 } from 'recharts'
 import './dashboard.css'
+
+const API_URL = 'http://localhost:5000/api'
+
+async function apiRequest(path, options = {}) {
+  const token = localStorage.getItem('bizzconnect_token')
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.message || 'Request failed')
+  return payload
+}
 
 const initialGroups = [
   { id: 'rice', name: 'Sona Masoori Rice', detail: 'Premium raw rice · 25 kg bag', supplier: 'Shree Ganesh Wholesale', image: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=240&q=85', current: 760, target: 1000, unit: 'kg', price: 48, oldPrice: 56, retailers: 18, timeLeft: '14h 20m left', accent: 'green' },
@@ -67,6 +84,63 @@ function App() {
   const [newProduct, setNewProduct] = useState('')
   const [newQuantity, setNewQuantity] = useState('')
   const [toast, setToast] = useState('')
+  const [currentUser, setCurrentUser] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [authMode, setAuthMode] = useState('login')
+  const [authError, setAuthError] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', role: 'retailer', storeName: '' })
+  const [apiProducts, setApiProducts] = useState([])
+
+  useEffect(() => {
+    const token = localStorage.getItem('bizzconnect_token')
+    if (!token) {
+      setAuthReady(true)
+      return
+    }
+
+    apiRequest('/auth/me')
+      .then((payload) => setCurrentUser(payload.data))
+      .catch(() => {
+        localStorage.removeItem('bizzconnect_token')
+        localStorage.removeItem('bizzconnect_user')
+      })
+      .finally(() => setAuthReady(true))
+  }, [])
+
+  useEffect(() => {
+    if (!currentUser) return
+
+    Promise.all([apiRequest('/products'), apiRequest('/analytics/dashboard')])
+      .then(([productsPayload, analyticsPayload]) => {
+        setApiProducts(productsPayload.data || [])
+        if (analyticsPayload.data) {
+          setGroups((existing) => existing.length ? existing : initialGroups)
+        }
+      })
+      .catch(() => {})
+
+    apiRequest('/group-orders')
+      .then((payload) => {
+        if (!payload.data?.length) return
+        setGroups(payload.data.map((group) => ({
+          id: group._id,
+          name: group.title,
+          detail: group.description || `${group.unit} collective order`,
+          supplier: group.selectedSupplier?.businessName || 'Supplier selection pending',
+          image: group.product?.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=240&q=85',
+          current: group.currentQuantity,
+          target: group.targetQuantity,
+          unit: group.unit,
+          price: group.finalPricePerUnit || group.estimatedPricePerUnit,
+          oldPrice: group.product?.retailPrice || group.estimatedPricePerUnit,
+          retailers: group.participants?.length || 0,
+          timeLeft: `${Math.max(0, Math.ceil((new Date(group.deadline) - Date.now()) / 3600000))}h left`,
+          accent: 'green',
+        })))
+      })
+      .catch(() => {})
+  }, [currentUser])
 
   const filteredGroups = useMemo(() => groups.filter((group) => {
     const matchesQuery = `${group.name} ${group.supplier}`.toLowerCase().includes(query.toLowerCase())
@@ -78,25 +152,95 @@ function App() {
     window.setTimeout(() => setToast(''), 2800)
   }
 
-  function joinGroup(groupId) {
-    setJoinedGroups((joined) => [...joined, groupId])
-    setGroups((current) => current.map((group) => group.id === groupId ? { ...group, current: Math.min(group.current + 25, group.target), retailers: group.retailers + 1 } : group))
-    notify('You joined the collective order')
+  async function joinGroup(groupId) {
+    if (groupId.startsWith('rice') || groupId.startsWith('oil')) {
+      setJoinedGroups((joined) => [...joined, groupId])
+      setGroups((current) => current.map((group) => group.id === groupId ? { ...group, current: Math.min(group.current + 25, group.target), retailers: group.retailers + 1 } : group))
+      notify('Demo join complete')
+      return
+    }
+
+    try {
+      await apiRequest(`/group-orders/${groupId}/join`, { method: 'POST', body: JSON.stringify({ quantity: 25 }) })
+      setJoinedGroups((joined) => [...joined, groupId])
+      notify('You joined the collective order')
+    } catch (error) {
+      notify(error.message)
+    }
   }
 
-  function createGroup(event) {
+  async function createGroup(event) {
     event.preventDefault()
     if (!newProduct.trim() || !newQuantity) return
-    setGroups((current) => [{
-      id: `custom-${Date.now()}`, name: newProduct.trim(), detail: 'Your neighbourhood group · New request',
-      supplier: 'Finding wholesale suppliers', image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=240&q=85',
-      current: Number(newQuantity), target: Number(newQuantity) * 2, unit: 'units', price: null,
-      oldPrice: null, retailers: 1, timeLeft: 'Just started', accent: 'green',
-    }, ...current])
-    setShowCreateGroup(false)
-    setNewProduct('')
-    setNewQuantity('')
-    notify('Your group order request is ready')
+
+    const matchedProduct = apiProducts.find((product) => product.name.toLowerCase().includes(newProduct.trim().toLowerCase()))
+    if (!matchedProduct) {
+      notify('No matching catalogue product found')
+      return
+    }
+
+    try {
+      const payload = await apiRequest('/group-orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          product: matchedProduct._id,
+          title: matchedProduct.name,
+          description: 'Retailer collective order',
+          targetQuantity: Number(newQuantity) * 2,
+          estimatedPricePerUnit: matchedProduct.wholesalePrice,
+          deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        }),
+      })
+      const group = payload.data
+      setGroups((current) => [{
+        id: group._id,
+        name: group.title,
+        detail: 'Retailer collective order',
+        supplier: 'Supplier selection pending',
+        image: matchedProduct.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=240&q=85',
+        current: 0,
+        target: group.targetQuantity,
+        unit: matchedProduct.unit,
+        price: matchedProduct.wholesalePrice,
+        oldPrice: matchedProduct.retailPrice,
+        retailers: 0,
+        timeLeft: '24h left',
+        accent: 'green',
+      }, ...current])
+      setShowCreateGroup(false)
+      setNewProduct('')
+      setNewQuantity('')
+      notify('Your group order is live')
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  async function handleAuth(event) {
+    event.preventDefault()
+    setAuthError('')
+    setAuthLoading(true)
+    try {
+      const path = authMode === 'login' ? '/auth/login' : '/auth/register'
+      const body = authMode === 'login'
+        ? { email: authForm.email, password: authForm.password }
+        : authForm
+      const payload = await apiRequest(path, { method: 'POST', body: JSON.stringify(body) })
+      localStorage.setItem('bizzconnect_token', payload.data.token)
+      localStorage.setItem('bizzconnect_user', JSON.stringify(payload.data.user))
+      setCurrentUser(payload.data.user)
+      notify(authMode === 'login' ? 'Welcome back' : 'Account created')
+    } catch (error) {
+      setAuthError(error.message)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('bizzconnect_token')
+    localStorage.removeItem('bizzconnect_user')
+    setCurrentUser(null)
   }
 
   const description = activeNav === 'Overview'
@@ -106,6 +250,28 @@ function App() {
       : activeNav === 'Browse products'
         ? 'Find wholesale deals and join a neighbourhood buying group.'
         : 'Follow every order from supplier confirmation to your storefront.'
+
+  if (!authReady) return <div className="auth-loading"><span className="brand-mark"><Boxes size={21} /></span><strong>Loading BizzConnect...</strong></div>
+
+  if (!currentUser) return <main className="auth-page">
+    <section className="auth-brand-panel">
+      <div className="auth-brand"><span className="brand-mark"><Boxes size={21} /></span><span className="brand-name">bizz<span>connect</span><small>RETAILER WORKSPACE</small></span></div>
+      <div className="auth-brand-copy"><div className="auth-kicker">COLLECTIVE PROCUREMENT</div><h1>Buy together.<br />Grow together.</h1><p>Pool demand with nearby retailers, unlock wholesale prices, and follow every order from supplier to store.</p></div>
+    </section>
+    <section className="auth-form-panel">
+      <form className="auth-form" onSubmit={handleAuth}>
+        <div className="auth-tabs"><button type="button" className={authMode === 'login' ? 'active' : ''} onClick={() => { setAuthMode('login'); setAuthError('') }}>Sign in</button><button type="button" className={authMode === 'register' ? 'active' : ''} onClick={() => { setAuthMode('register'); setAuthError('') }}>Create account</button></div>
+        <div className="auth-heading"><div className="section-kicker">BIZZCONNECT ACCOUNT</div><h2>{authMode === 'login' ? 'Welcome back' : 'Create your retailer account'}</h2><p>{authMode === 'login' ? 'Sign in to manage your collective procurement.' : 'Get access to group buying and supplier bids.'}</p></div>
+        {authMode === 'register' && <label>Full name<input value={authForm.name} onChange={(event) => setAuthForm((form) => ({ ...form, name: event.target.value }))} placeholder="Asha Sharma" required /></label>}
+        <label>Email address<input type="email" value={authForm.email} onChange={(event) => setAuthForm((form) => ({ ...form, email: event.target.value }))} placeholder="you@store.com" required /></label>
+        <label>Password<input type="password" value={authForm.password} onChange={(event) => setAuthForm((form) => ({ ...form, password: event.target.value }))} placeholder="At least 6 characters" required /></label>
+        {authMode === 'register' && <><label>Store name<input value={authForm.storeName} onChange={(event) => setAuthForm((form) => ({ ...form, storeName: event.target.value }))} placeholder="Sharma General Store" required /></label><label>Account role<select value={authForm.role} onChange={(event) => setAuthForm((form) => ({ ...form, role: event.target.value }))}><option value="retailer">Retailer</option><option value="wholesaler">Wholesaler</option></select></label></>}
+        {authError && <div className="auth-error">{authError}</div>}
+        <button className="auth-submit" type="submit" disabled={authLoading}>{authLoading ? 'Please wait...' : authMode === 'login' ? 'Sign in' : 'Create account'}<ArrowRight size={16} /></button>
+        {authMode === 'login' && <button type="button" className="demo-login" onClick={() => setAuthForm((form) => ({ ...form, email: 'retailer@bizzconnect.local', password: 'Retailer123!' }))}>Use demo retailer login</button>}
+      </form>
+    </section>
+  </main>
 
   return <div className="app-shell">
     <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
@@ -119,18 +285,18 @@ function App() {
       <div className="sidebar-spacer" />
       <div className="power-card"><div className="power-heading"><span><Sparkles size={14} /> RETAILER POWER</span><strong>84</strong></div><div className="power-bar"><span /></div><p>You’re in the top 18% of active retailers.</p><button onClick={() => setActiveNav('Savings & insights')}>See your insights <ArrowRight size={13} /></button></div>
       <button className="sidebar-help" onClick={() => setShowStoreMenu((open) => !open)}><CircleHelp size={17} /> Help & support <ChevronRight size={15} /></button>
-      <div className="profile-row"><div className="profile-avatar">AS</div><div><strong>Asha Sharma</strong><span>Store owner</span></div><button aria-label="Open profile menu"><ChevronDown size={15} /></button></div>
+      <div className="profile-row"><div className="profile-avatar">{(currentUser.name || 'User').split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</div><div><strong>{currentUser.name}</strong><span>{currentUser.storeName || (currentUser.role === 'admin' ? 'Platform admin' : 'Wholesaler')}</span></div><button aria-label="Log out" title="Log out" onClick={logout}><ArrowRight size={15} /></button></div>
     </aside>
 
     <main className="main-area">
       <header className="topbar"><button className="mobile-menu-button" aria-label="Toggle navigation" onClick={() => setMobileMenuOpen((open) => !open)}><Menu size={19} /></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{activeNav}</strong></div><div className="topbar-actions">
         <label className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search products, suppliers..." /><kbd>⌘ K</kbd></label>
         <div className="notification-wrap"><button className="icon-button notification-button" aria-label="Notifications" onClick={() => setShowNotifications((visible) => !visible)}><Bell size={18} /><i /></button>{showNotifications && <div className="notification-popover"><strong>Notifications</strong><p><span className="notification-dot" />Sunflower oil group order closes in 1 day.</p><p><span className="notification-dot blue-dot" />Toor Dal order reached the distribution hub.</p><button onClick={() => setShowNotifications(false)}>Mark all as read</button></div>}</div>
-        <button className="top-avatar" aria-label="Asha Sharma profile">AS</button>
+        <button className="top-avatar" aria-label="Current user profile" onClick={logout}>{(currentUser.name || 'User').split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</button>
       </div></header>
 
       <div className="page-content">
-        <section className="welcome-row"><div><div className="eyebrow"><span /> THURSDAY, 19 NOVEMBER 2026</div><h1>{activeNav === 'Overview' ? 'Good morning, Asha' : activeNav}</h1><p>{description}</p></div><button className="primary-button" onClick={() => setShowCreateGroup(true)}><Plus size={17} /> Start a group order</button></section>
+        <section className="welcome-row"><div><div className="eyebrow"><span /> THURSDAY, 19 NOVEMBER 2026</div><h1>{activeNav === 'Overview' ? `Good morning, ${currentUser.name?.split(' ')[0] || 'Asha'}` : activeNav}</h1><p>{description}</p></div><button className="primary-button" onClick={() => setShowCreateGroup(true)}><Plus size={17} /> Start a group order</button></section>
         <section className="metrics-grid" aria-label="Procurement summary">
           <MetricCard icon={Coins} label="Savings this month" value="₹18,420" note="↗ 14.8% vs last month" accent="mint" />
           <MetricCard icon={Users} label="Active group orders" value="04" note="2 closing soon" accent="blue" />
