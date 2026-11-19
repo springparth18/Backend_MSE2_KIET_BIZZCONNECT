@@ -160,3 +160,11 @@ To build a collaborative procurement ecosystem where independent retailers can a
 ---
 
 **BizzConnect — Buy Together. Save Together. Grow Together.**
+<img width="1440" height="814" alt="WhatsApp Image 2026-11-20 at 12 56 49 AM" src="https://github.com/user-attachments/assets/76f3656b-af67-45e5-b93f-ae5aba8c8d0f" />
+<img width="1438" height="810" alt="WhatsApp Image 2026-11-20 at 12 56 49 AM (1)" src="https://github.com/user-attachments/assets/452cb7cf-d937-40e1-907d-71fc7c02c64b" />
+<img width="1440" height="852" alt="WhatsApp Image 2026-11-20 at 12 56 49 AM (2)" src="https://github.com/user-attachments/assets/c9394eaa-3809-4038-bb58-7530acfa62ef" />
+<img width="1438" height="824" alt="WhatsApp Image 2026-11-20 at 12 56 50 AM" src="https://github.com/user-attachments/assets/21f4353e-a292-40a2-a46b-86a6b16fc8f3" />
+<img width="1434" height="828" alt="WhatsApp Image 2026-11-20 at 12 56 50 AM (1)" src="https://github.com/user-attachments/assets/68ac1b5a-cbce-4558-8f72-630bbe76b347" />
+<img width="1440" height="824" alt="WhatsApp Image 2026-11-20 at 12 56 50 AM (2)" src="https://github.com/user-attachments/assets/862d0bed-e9b6-4756-af2f-55964ebf8a0a" />
+<img width="1440" height="812" alt="WhatsApp Image 2026-11-20 at 12 56 50 AM (3)" src="https://github.com/user-attachments/assets/2f6ca6bb-bcb7-4f11-b233-ec0856a4b43c" />
+
