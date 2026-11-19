@@ -13,6 +13,12 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json({ success: true, count: products.length, data: products });
 }));
 
+router.get('/mine', protect, authorize('wholesaler', 'admin'), asyncHandler(async (req, res) => {
+  const filter = req.user.role === 'admin' ? {} : { wholesaler: req.user._id };
+  const products = await Product.find(filter).populate('wholesaler', 'name businessName').sort('-createdAt');
+  res.json({ success: true, count: products.length, data: products });
+}));
+
 router.get('/:id', asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id).populate('wholesaler', 'name businessName reliabilityScore isVerified');
   if (!product) return res.status(404).json({ success: false, message: 'Product not found' });

@@ -11,6 +11,8 @@ const registerRules = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('role').optional().isIn(['retailer', 'wholesaler', 'admin']).withMessage('Invalid role'),
+  body('storeName').if(body('role').equals('retailer')).trim().notEmpty().withMessage('Store name is required for retailer accounts'),
+  body('businessName').if(body('role').equals('wholesaler')).trim().notEmpty().withMessage('Business name is required for wholesaler accounts'),
 ];
 
 router.post('/register', registerRules, validate, asyncHandler(async (req, res) => {

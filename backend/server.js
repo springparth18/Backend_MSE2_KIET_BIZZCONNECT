@@ -6,6 +6,8 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
 const connectDB = require('./config/db');
+const User = require('./models/User');
+const { seed } = require('./utils/seed');
 
 const app = express();
 
@@ -77,6 +79,18 @@ app.use((err, req, res, _next) => {
 
 const start = async () => {
   await connectDB();
+
+  try {
+    const userCount = await User.countDocuments();
+    if (userCount === 0) {
+      console.log('No users found in database. Auto-seeding initial demo data...');
+      await seed(false);
+      console.log('Database seeded with demo users, products, and group orders.');
+    }
+  } catch (err) {
+    console.warn('Auto-seed check notice:', err.message);
+  }
+
   const port = Number(process.env.PORT || 5000);
   const server = app.listen(port, () => {
     console.log(`BizzConnect server running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);

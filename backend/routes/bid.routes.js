@@ -6,6 +6,12 @@ const { protect, authorize } = require('../middleware/auth');
 const Bid = require('../models/Bid');
 const GroupOrder = require('../models/GroupOrder');
 
+router.get('/mine', protect, authorize('wholesaler', 'admin'), asyncHandler(async (req, res) => {
+  const filter = req.user.role === 'admin' ? {} : { wholesaler: req.user._id };
+  const bids = await Bid.find(filter).populate('groupOrder wholesaler').sort('-createdAt');
+  res.json({ success: true, count: bids.length, data: bids });
+}));
+
 router.get('/group/:groupId', protect, asyncHandler(async (req, res) => {
   const bids = await Bid.find({ groupOrder: req.params.groupId }).populate('wholesaler', 'name businessName reliabilityScore isVerified').sort('pricePerUnit');
   res.json({ success: true, count: bids.length, data: bids });
@@ -18,28 +24,39 @@ router.post('/', protect, authorize('wholesaler'), [
 ], validate, asyncHandler(async (req, res) => {
   const group = await GroupOrder.findById(req.body.groupOrder);
   if (!group) return res.status(404).json({ success: false, message: 'Group order not found' });
-  if (!['threshold_reached', 'bidding'].includes(group.status)) return res.status(400).json({ success: false, message: 'Bidding is not open for this group order' });
+  if (!['open', 'threshold_reached', 'bidding'].includes(group.status)) {
+    return res.status(400).json({ success: false, message: 'Bidding is not open for this group order' });
+  }
   if (!req.user.isVerified) return res.status(403).json({ success: false, message: 'Your wholesaler account is awaiting verification' });
 
   const bid = await Bid.create({ ...req.body, wholesaler: req.user._id });
-  if (group.status === 'threshold_reached') {
+  if (['open', 'threshold_reached'].includes(group.status)) {
     group.status = 'bidding';
-    await group.save();
   }
+  if (!group.estimatedPricePerUnit || req.body.pricePerUnit < group.estimatedPricePerUnit) {
+    group.estimatedPricePerUnit = req.body.pricePerUnit;
+  }
+  await group.save();
   res.status(201).json({ success: true, data: bid });
 }));
 
-router.post('/:id/accept', protect, authorize('admin'), asyncHandler(async (req, res) => {
+router.post('/:id/accept', protect, asyncHandler(async (req, res) => {
   const bid = await Bid.findById(req.params.id);
   if (!bid) return res.status(404).json({ success: false, message: 'Bid not found' });
+  const group = await GroupOrder.findById(bid.groupOrder);
+  if (!group) return res.status(404).json({ success: false, message: 'Group order not found' });
+  if (req.user.role !== 'admin' && !group.initiator.equals(req.user._id)) {
+    return res.status(403).json({ success: false, message: 'Only admin or the group initiator can accept a bid' });
+  }
   await Bid.updateMany({ groupOrder: bid.groupOrder, _id: { $ne: bid._id } }, { status: 'rejected' });
   bid.status = 'accepted';
   await bid.save();
 
-  await GroupOrder.findByIdAndUpdate(bid.groupOrder, {
-    status: 'supplier_selected', selectedBid: bid._id,
-    selectedSupplier: bid.wholesaler, finalPricePerUnit: bid.pricePerUnit,
-  });
+  group.status = 'supplier_selected';
+  group.selectedBid = bid._id;
+  group.selectedSupplier = bid.wholesaler;
+  group.finalPricePerUnit = bid.pricePerUnit;
+  await group.save();
   res.json({ success: true, data: bid });
 }));
 

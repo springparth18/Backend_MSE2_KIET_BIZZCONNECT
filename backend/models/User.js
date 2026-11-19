@@ -43,6 +43,10 @@ const userSchema = new mongoose.Schema({
   reliabilityScore: { type: Number, default: 50, min: 0, max: 100 },
   totalOrders: { type: Number, default: 0 },
   totalSavings: { type: Number, default: 0 },
+  savingsHistory: [{
+    month: { type: String, required: true },
+    amount: { type: Number, min: 0, default: 0 },
+  }],
 }, { timestamps: true });
 
 // Hash password before saving

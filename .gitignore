@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+data/
+*.zip
+Backend_MSE2_KIET_BIZZCONNECT-main/
+.DS_Store

@@ -50,7 +50,9 @@ router.post('/:id/refund', asyncHandler(async (req, res) => {
 
 router.get('/', asyncHandler(async (req, res) => {
   const filter = req.user.role === 'admin' ? {} : { retailer: req.user._id };
-  const payments = await Payment.find(filter).populate('order').sort('-createdAt');
+  const payments = await Payment.find(filter)
+    .populate({ path: 'order', populate: [{ path: 'retailer', select: 'name email storeName storeAddress' }, { path: 'wholesaler', select: 'name businessName businessAddress' }, { path: 'items.product', select: 'name unit retailPrice' }] })
+    .sort('-createdAt');
   res.json({ success: true, count: payments.length, data: payments });
 }));
 

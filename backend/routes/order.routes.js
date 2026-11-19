@@ -29,6 +29,9 @@ router.post('/from-group/:groupId', authorize('retailer', 'admin'), asyncHandler
   const participant = group.participants.find((entry) => entry.retailer.equals(req.user._id));
   if (!participant && req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'You have not joined this group order' });
 
+  const existingOrder = await Order.findOne({ retailer: req.user._id, groupOrder: group._id, status: { $ne: 'cancelled' } });
+  if (existingOrder) return res.status(409).json({ success: false, message: 'An order already exists for this group. Retry payment from your order history if needed.' });
+
   const quantity = participant ? participant.quantity : req.body.quantity;
   if (!quantity) return res.status(400).json({ success: false, message: 'Quantity is required' });
   const price = group.finalPricePerUnit || group.estimatedPricePerUnit;

@@ -10,7 +10,11 @@ router.get('/', asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
   if (req.query.neighbourhood) filter.neighbourhood = req.query.neighbourhood;
-  const groups = await GroupOrder.find(filter).populate('product initiator selectedSupplier', 'name title category storeName businessName').sort('-createdAt');
+  const groups = await GroupOrder.find(filter)
+    .populate('product')
+    .populate('initiator', 'name storeName neighbourhood city email')
+    .populate('selectedSupplier', 'name businessName reliabilityScore isVerified email phone')
+    .sort('-createdAt');
   res.json({ success: true, count: groups.length, data: groups });
 }));
 
@@ -23,6 +27,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 router.post('/', protect, authorize('retailer', 'admin'), [
   body('product').isMongoId(), body('title').trim().notEmpty(),
   body('targetQuantity').isFloat({ min: 1 }), body('deadline').isISO8601(),
+  body('initialQuantity').optional().isFloat({ min: 1 }),
 ], validate, asyncHandler(async (req, res) => {
   const product = await Product.findById(req.body.product);
   if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
@@ -34,7 +39,11 @@ router.post('/', protect, authorize('retailer', 'admin'), [
     neighbourhood: req.body.neighbourhood || req.user.neighbourhood,
     unit: req.body.unit || product.unit,
     estimatedPricePerUnit: req.body.estimatedPricePerUnit || product.wholesalePrice,
+    currentQuantity: Number(req.body.initialQuantity || 0),
+    participants: req.body.initialQuantity ? [{ retailer: req.user._id, quantity: Number(req.body.initialQuantity) }] : [],
   });
+  if (group.currentQuantity >= group.targetQuantity) group.status = 'threshold_reached';
+  await group.save();
   res.status(201).json({ success: true, data: group });
 }));
 
